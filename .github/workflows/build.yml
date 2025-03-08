@@ -1,0 +1,139 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main  # Trigger on pushes to main branch
+    tags:
+      - 'v*'  # Trigger on version tags (v1.0.0, etc.)
+  workflow_dispatch:  # Allow manual triggering from GitHub Actions tab
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: ModConflictDetector-Windows
+            asset_name: mod-conflict-detector-windows.zip
+            python_version: "3.9"
+          - os: macos-latest
+            artifact_name: ModConflictDetector-MacOS
+            asset_name: mod-conflict-detector-macos.zip
+            python_version: "3.9"
+          - os: ubuntu-latest
+            artifact_name: ModConflictDetector-Linux
+            asset_name: mod-conflict-detector-linux.zip
+            python_version: "3.9"
+
+    steps:
+    - uses: actions/checkout@v3
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python_version }}
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install -e .
+
+    - name: Create resources directory
+      run: mkdir -p resources
+
+    - name: Run tests
+      run: python run_tests.py
+
+    - name: Build with PyInstaller (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        pyinstaller --clean --noconfirm --name=ModConflictDetector --onefile --console mod_conflict_detector.py
+
+    - name: Build with PyInstaller (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        pyinstaller --clean --noconfirm --name=ModConflictDetector --onefile --windowed mod_conflict_detector.py
+        # Code signing would go here for production releases
+
+    - name: Build with PyInstaller (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        pyinstaller --clean --noconfirm --name=ModConflictDetector --onefile mod_conflict_detector.py
+
+    - name: Create Windows launcher
+      if: matrix.os == 'windows-latest'
+      run: |
+        echo '@echo off' > dist/Run-ModConflictDetector.bat
+        echo 'echo Starting Mod Conflict Detector...' >> dist/Run-ModConflictDetector.bat
+        echo 'start ModConflictDetector.exe' >> dist/Run-ModConflictDetector.bat
+
+    - name: Copy README and other files
+      run: |
+        cp README.md dist/
+      shell: bash
+
+    - name: Create ZIP file
+      run: |
+        cd dist
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          7z a -tzip ${{ matrix.artifact_name }}.zip *
+        else
+          zip -r ${{ matrix.artifact_name }}.zip *
+        fi
+      shell: bash
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: dist/${{ matrix.artifact_name }}.zip
+        
+  release:
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Download Windows artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: ModConflictDetector-Windows
+        path: windows-artifact
+        
+    - name: Download macOS artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: ModConflictDetector-MacOS
+        path: macos-artifact
+        
+    - name: Download Linux artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: ModConflictDetector-Linux
+        path: linux-artifact
+
+    - name: Get version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+        
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: Sims 4 Mod Conflict Detector v${{ env.VERSION }}
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        files: |
+          windows-artifact/ModConflictDetector-Windows.zip
+          macos-artifact/ModConflictDetector-MacOS.zip
+          linux-artifact/ModConflictDetector-Linux.zip
