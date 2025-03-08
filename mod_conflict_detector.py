@@ -3,6 +3,9 @@ import os
 import argparse
 import csv
 import time
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+import sys
 from typing import Dict, List, Set, Tuple
 from pathlib import Path
 
@@ -165,20 +168,160 @@ def write_csv_report(sorted_files: List[Tuple[str, Set[str]]], output_file: str)
                 writer.writerow([rel_path, rel_conflict, "Resource Override"])
 
 
+class RedirectText:
+    def __init__(self, text_widget):
+        self.text_widget = text_widget
+        self.buffer = ""
+
+    def write(self, string):
+        self.buffer += string
+        self.text_widget.configure(state=tk.NORMAL)
+        self.text_widget.insert(tk.END, string)
+        self.text_widget.configure(state=tk.DISABLED)
+        self.text_widget.see(tk.END)
+
+    def flush(self):
+        pass
+
+
+class ModConflictDetectorGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Sims 4 Mod Conflict Detector")
+        self.root.geometry("800x600")
+        
+        # Create frame for inputs
+        input_frame = ttk.Frame(root, padding="10")
+        input_frame.pack(fill=tk.X)
+        
+        # Mods directory selection
+        ttk.Label(input_frame, text="Mods Directory:").grid(column=0, row=0, sticky=tk.W, padx=5, pady=5)
+        self.mods_dir_var = tk.StringVar()
+        ttk.Entry(input_frame, textvariable=self.mods_dir_var, width=50).grid(column=1, row=0, padx=5, pady=5)
+        ttk.Button(input_frame, text="Browse...", command=self.browse_mods_dir).grid(column=2, row=0, padx=5, pady=5)
+        
+        # Output file selection
+        ttk.Label(input_frame, text="Output File:").grid(column=0, row=1, sticky=tk.W, padx=5, pady=5)
+        self.output_file_var = tk.StringVar()
+        ttk.Entry(input_frame, textvariable=self.output_file_var, width=50).grid(column=1, row=1, padx=5, pady=5)
+        ttk.Button(input_frame, text="Browse...", command=self.browse_output_file).grid(column=2, row=1, padx=5, pady=5)
+        
+        # Verbose option
+        self.verbose_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(input_frame, text="Show detailed progress", variable=self.verbose_var).grid(column=1, row=2, sticky=tk.W, padx=5, pady=5)
+        
+        # Run button
+        ttk.Button(input_frame, text="Run Conflict Detection", command=self.run_detection).grid(column=1, row=3, pady=10)
+        
+        # Create frame for output text
+        output_frame = ttk.Frame(root, padding="10")
+        output_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Add scrollable text widget for output
+        ttk.Label(output_frame, text="Output:").pack(anchor=tk.W)
+        
+        # Create a scrollbar
+        scrollbar = ttk.Scrollbar(output_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Create text widget with scrollbar
+        self.output_text = tk.Text(output_frame, wrap=tk.WORD, height=20, state=tk.DISABLED)
+        self.output_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Attach scrollbar to text widget
+        self.output_text.config(yscrollcommand=scrollbar.set)
+        scrollbar.config(command=self.output_text.yview)
+        
+        # Set default mods directory if on Windows
+        if os.name == 'nt':
+            default_mods_dir = os.path.join(os.path.expanduser('~'), 'Documents', 'Electronic Arts', 'The Sims 4', 'Mods')
+            if os.path.exists(default_mods_dir):
+                self.mods_dir_var.set(default_mods_dir)
+        
+        # Set default output file in the same directory as the executable
+        try:
+            base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+            self.output_file_var.set(os.path.join(base_dir, "conflict_report.csv"))
+        except:
+            self.output_file_var.set(os.path.join(os.path.expanduser('~'), "conflict_report.csv"))
+    
+    def browse_mods_dir(self):
+        directory = filedialog.askdirectory(title="Select Sims 4 Mods Directory")
+        if directory:
+            self.mods_dir_var.set(directory)
+    
+    def browse_output_file(self):
+        file_path = filedialog.asksaveasfilename(
+            title="Select Output File",
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")]
+        )
+        if file_path:
+            self.output_file_var.set(file_path)
+    
+    def run_detection(self):
+        mods_dir = self.mods_dir_var.get()
+        output_file = self.output_file_var.get()
+        verbose = self.verbose_var.get()
+        
+        if not mods_dir:
+            messagebox.showerror("Error", "Please select the Mods directory.")
+            return
+        
+        if not os.path.exists(mods_dir):
+            messagebox.showerror("Error", f"The selected directory does not exist: {mods_dir}")
+            return
+        
+        # Clear output text
+        self.output_text.configure(state=tk.NORMAL)
+        self.output_text.delete(1.0, tk.END)
+        self.output_text.configure(state=tk.DISABLED)
+        
+        # Redirect stdout to the text widget
+        old_stdout = sys.stdout
+        sys.stdout = RedirectText(self.output_text)
+        
+        try:
+            # Run in a separate thread to keep the GUI responsive
+            self.root.after(100, lambda: self._execute_detection(mods_dir, output_file, verbose, old_stdout))
+        except Exception as e:
+            sys.stdout = old_stdout
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+    
+    def _execute_detection(self, mods_dir, output_file, verbose, old_stdout):
+        try:
+            detect_conflicts(mods_dir, output_file, verbose)
+            # Show success message
+            if output_file:
+                messagebox.showinfo("Success", f"Conflict detection completed. Report saved to:\n{output_file}")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+        finally:
+            # Restore stdout
+            sys.stdout = old_stdout
+
+
 def main():
-    # Set up command-line arguments
-    parser = argparse.ArgumentParser(
-        description='Detect conflicts in Sims 4 mods.',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    parser.add_argument('mods_dir', help='Path to the Sims 4 Mods directory')
-    parser.add_argument('-o', '--output', help='Path to save the conflict report')
-    parser.add_argument('-v', '--verbose', action='store_true', help='Print detailed progress')
-    
-    args = parser.parse_args()
-    
-    # Run the conflict detector
-    detect_conflicts(args.mods_dir, args.output, args.verbose)
+    # Check if we have command line arguments
+    if len(sys.argv) > 1:
+        # Command-line mode
+        parser = argparse.ArgumentParser(
+            description='Detect conflicts in Sims 4 mods.',
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        )
+        parser.add_argument('mods_dir', help='Path to the Sims 4 Mods directory')
+        parser.add_argument('-o', '--output', help='Path to save the conflict report')
+        parser.add_argument('-v', '--verbose', action='store_true', help='Print detailed progress')
+        
+        args = parser.parse_args()
+        
+        # Run the conflict detector in command-line mode
+        detect_conflicts(args.mods_dir, args.output, args.verbose)
+    else:
+        # GUI mode
+        root = tk.Tk()
+        app = ModConflictDetectorGUI(root)
+        root.mainloop()
 
 
 if __name__ == "__main__":

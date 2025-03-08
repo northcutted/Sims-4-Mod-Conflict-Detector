@@ -361,6 +361,11 @@ def _parse_dbpf_v2(reader: DBPFReader, file_path: str = None) -> Set[ResourceKey
         # Read resource entries in batches for better performance
         batch_size = min(100, index_entry_count)  # Process up to 100 entries at once
         
+        # Ensure batch_size is not zero to avoid "range() arg 3 must not be zero" error
+        if batch_size == 0:
+            # If there are no entries to process, return empty set
+            return resources
+            
         for batch_start in range(0, index_entry_count, batch_size):
             batch_end = min(batch_start + batch_size, index_entry_count)
             
