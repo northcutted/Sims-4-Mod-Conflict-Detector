@@ -133,6 +133,7 @@ jobs:
         draft: false
         prerelease: false
         generate_release_notes: true
+        token: ${{ secrets.GITHUB_TOKEN }}
         files: |
           windows-artifact/ModConflictDetector-Windows.zip
           macos-artifact/ModConflictDetector-MacOS.zip
