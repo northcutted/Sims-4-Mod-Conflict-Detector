@@ -1,124 +1,114 @@
 # Sims 4 Mod Conflict Detector
 
-This tool scans your Sims 4 mods folder to identify potential conflicts between different mods. It analyzes the resource identifiers in package files to detect when two or more mods are trying to modify the same game resources.
+[![GitHub Actions Status](https://github.com/northcutted/Sims-4-Mod-Conflict-Detector/actions/workflows/build.yml/badge.svg)](https://github.com/northcutted/Sims-4-Mod-Conflict-Detector/actions)
+
+A modern, user-friendly tool to detect conflicts between Sims 4 mods by analyzing package files and identifying when multiple mods try to modify the same game resources.
+
+<div align="center">
+  <img src=".github/images/icon.png" alt="Sims 4 Mod Conflict Detector" width="128" height="128">
+</div>
 
 ## Features
 
+- Modern graphical interface with progress tracking
 - Scans Sims 4 package files (.package) to extract resource identifiers
 - Detects conflicts where multiple mods modify the same resources
-- Works on Windows, macOS, and Linux
+- Provides detailed conflict analysis with severity levels
+- Generates comprehensive CSV reports
+- Visual indicators for conflict severity (🔴 High, 🟡 Medium, 🟢 Low)
+- Resource type classification for better understanding of conflicts
+- Cross-platform support (Windows, macOS, Linux)
 - Supports both DBPF v1 and v2 package formats
 
-## Requirements
+## Screenshots
 
-- Python 3.6 or newer
+![Sims 4 Mod Conflict Detector](.github/images/screenshot.png)
 
 ## Installation
 
 ### Windows
+1. Download the latest release from the Releases page
+2. Extract the ZIP file
+3. Run `Sims 4 Mod Conflict Detector.exe`
 
-1. Download or clone this repository
-2. Make sure Python 3.6+ is installed (download from [python.org](https://www.python.org/downloads/))
-3. Double-click on `run_detector.bat` to start the tool
+### macOS
+1. Download the latest release from the Releases page
+2. Open the DMG file
+3. Drag `Sims 4 Mod Conflict Detector.app` to your Applications folder
+4. Open the app from Applications
 
-Alternatively, you can install the package:
-
-```
-pip install -e .
-mod_conflict_detector
-```
-
-### macOS/Linux
-
-1. Download or clone this repository
-2. Open Terminal
-3. Navigate to the project directory: 
-   ```
-   cd path/to/mod_conflict_detector
-   ```
-4. Run the tool: 
-   ```
-   python mod_conflict_detector.py
-   ```
-
-Or install the package:
-
-```
-pip install -e .
-mod_conflict_detector
-```
+### Linux
+1. Download the latest release from the Releases page
+2. Extract the archive
+3. Run the executable
 
 ## Usage
 
-### Basic Usage
+1. Launch the application
+2. Click "Browse" to select your Sims 4 Mods folder
+3. (Optional) Choose a location for the conflict report CSV file
+4. Click "Start Conflict Detection"
+5. Review the results in the application and/or the generated report
 
-Run the tool with the path to your mods folder:
+### Common Paths to Sims 4 Mods Folder
 
-```
-python mod_conflict_detector.py "/path/to/Sims 4/Mods"
-```
+- Windows: `C:\Users\[YourUsername]\Documents\Electronic Arts\The Sims 4\Mods`
+- macOS: `~/Documents/Electronic Arts/The Sims 4/Mods`
+- Linux: `~/Documents/Electronic Arts/The Sims 4/Mods`
 
-### Command Line Options
+## Understanding the Results
 
-```
-python mod_conflict_detector.py [options] [path_to_mods_folder]
-```
+The tool categorizes conflicts by severity:
 
-Options:
-- `--recursive` or `-r`: Scan subdirectories (default: enabled)
-- `--verbose` or `-v`: Display more detailed information
-- `--by-type` or `-t`: Group conflicts by resource type instead of individual resources
-- `--output` or `-o`: Specify output file for the report (default: displayed in console)
+- 🔴 High: >100 shared resources - Mods likely incompatible, remove one
+- 🟡 Medium: 10-100 shared resources - Mods may have issues, test in game
+- 🟢 Low: <10 shared resources - Minor conflicts, probably safe
 
-### Examples
-
-Scan the default Sims 4 Mods folder:
-```
-python mod_conflict_detector.py
-```
-
-Scan a specific folder:
-```
-python mod_conflict_detector.py "D:\Games\Sims 4\Mods"
-```
-
-Generate a report file:
-```
-python mod_conflict_detector.py --output conflicts.txt
-```
-
-## Common Paths to Sims 4 Mods Folder
-
-- **Windows**: `C:\Users\[YourUsername]\Documents\Electronic Arts\The Sims 4\Mods`
-- **macOS**: `/Users/[YourUsername]/Documents/Electronic Arts/The Sims 4\Mods`
+The CSV report provides detailed information about:
+- Which mods conflict with each other
+- Number of shared resources
+- Types of resources in conflict
+- Recommended actions
 
 ## Troubleshooting
 
-### File Permission Issues
+### Common Issues
 
-If you encounter permission errors:
-- Make sure you have read access to the mods folder
-- Try running the script with administrator privileges
+1. **Gray/empty windows**: Try reinstalling the application
+2. **Can't find mods folder**: Enter the path manually or ensure you have access to the Documents folder
+3. **No conflicts detected**: Verify you selected the correct Mods folder and that it contains .package files
 
-### Large Files
+### Error Messages
 
-For very large mod folders:
-- The scan might take some time, please be patient
-- If you encounter memory issues, try scanning subdirectories separately
-
-### Windows-Specific Issues
-
-- If you get "Python is not recognized as an internal or external command", make sure Python is installed and added to your PATH
-- If you have issues with file paths containing spaces, enclose the path in quotes
+- "Invalid package file": The file may be corrupted or not a valid Sims 4 package
+- "Access denied": Check folder permissions
+- "No mods found": Verify the selected folder contains .package files
 
 ## Development
 
-To run the test suite:
+### Requirements
 
-```
-python run_tests.py
+- Python 3.8 or newer
+- Required packages:
+  - tkinter (usually comes with Python)
+  - pillow (for icon handling)
+
+### Building from Source
+
+1. Clone the repository
+2. Install dependencies: `pip install -r requirements.txt`
+3. Run: `python mod_conflict_detector.py`
+
+To build the executable:
+```bash
+pyinstaller ModConflictDetector.spec
 ```
 
 ## License
 
-This project is open source and available under the MIT License.
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- The Sims 4 modding community for documentation of the DBPF file format
+- All contributors to the project

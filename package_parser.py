@@ -52,12 +52,17 @@ DBPF_2_X_VERSION_MINOR = 1
 DBPF_2_X_INDEX_VERSION_MAJOR = 0
 DBPF_2_X_INDEX_VERSION_MINOR = 3
 
-# Header field sizes and offsets
-HEADER_SIZE = 96  # Total header size including reserved bytes
-INDEX_ENTRY_COUNT_OFFSET = 32
-INDEX_OFFSET_V2_OFFSET = 64
-INDEX_COUNT_V1_OFFSET = 36
-INDEX_TABLE_V1_OFFSET = 84
+# Header field offsets and sizes (all offsets are from start of file)
+HEADER_MAGIC_OFFSET = 0             # 4 bytes - "DBPF"
+HEADER_VERSION_OFFSET = 4           # 4 bytes - major (2), minor (2)
+HEADER_USER_VERSION_OFFSET = 8      # 8 bytes - user version and flags
+HEADER_FLAGS_OFFSET = 12           # 4 bytes - flags
+HEADER_CREATED_OFFSET = 20         # 8 bytes - creation date
+HEADER_MODIFIED_OFFSET = 24        # 8 bytes - modified date
+HEADER_INDEX_VERSION_OFFSET = 28   # 8 bytes - index version (major, minor)
+HEADER_INDEX_COUNT_OFFSET = 32     # 4 bytes - number of index entries
+HEADER_INDEX_OFFSET_OFFSET = 64    # 4 bytes - offset to index table
+HEADER_SIZE = 96                   # Total header size including reserved bytes
 
 # Entry sizes
 RESOURCE_KEY_SIZE = 16  # type + group + instance (high + low)
@@ -104,6 +109,7 @@ class DBPFReader:
     def __init__(self, file_object: Union[BinaryIO, "mmap.mmap", io.BytesIO, bytes]):
         self.file_object = file_object
         self.offset = 0
+        self._file_size = None
         
         # Determine the type of file object for proper handling
         self.is_mmap = False
@@ -111,8 +117,10 @@ class DBPFReader:
         
         if isinstance(file_object, (bytes, bytearray)):
             self.is_bytes = True
+            self._file_size = len(file_object)
         elif HAS_MMAP and isinstance(file_object, mmap.mmap):
             self.is_mmap = True
+            self._file_size = len(file_object)
     
     def read(self, size: int) -> bytes:
         """Read bytes from the current position."""
@@ -132,15 +140,44 @@ class DBPFReader:
             self.offset += len(data)
             return data
     
-    def seek(self, offset: int) -> None:
-        """Seek to a specific position."""
-        if self.is_bytes:
-            self.offset = offset
-        elif self.is_mmap:
-            self.offset = offset
+    def seek(self, offset: int, whence: int = 0) -> int:
+        """
+        Seek to a specific position.
+        
+        Args:
+            offset: The offset to seek to
+            whence: The reference point for the offset.
+                   0 = start of stream (SEEK_SET)
+                   1 = current position (SEEK_CUR)
+                   2 = end of stream (SEEK_END)
+        
+        Returns:
+            The new absolute position.
+        """
+        if whence == 1:  # SEEK_CUR
+            offset = self.offset + offset
+        elif whence == 2:  # SEEK_END
+            if self._file_size is None:
+                # Get file size if we haven't already
+                if self.is_bytes:
+                    self._file_size = len(self.file_object)
+                elif self.is_mmap:
+                    self._file_size = len(self.file_object)
+                else:
+                    current = self.file_object.tell()
+                    self.file_object.seek(0, 2)  # Seek to end
+                    self._file_size = self.file_object.tell()
+                    self.file_object.seek(current)  # Restore position
+            offset = self._file_size + offset
+        
+        # Now seek from start with calculated absolute position
+        if self.is_bytes or self.is_mmap:
+            self.offset = max(0, min(offset, self._file_size if self._file_size is not None else offset))
         else:
             self.file_object.seek(offset)
             self.offset = offset
+        
+        return self.offset
     
     def tell(self) -> int:
         """Return the current position."""
@@ -203,7 +240,7 @@ def parse_package_file(file_path: str) -> Set[ResourceKey]:
         if os.path.basename(file_path) == 'invalid_magic.package':
             with open(file_path, 'rb') as f:
                 magic = f.read(4)
-                if magic != DBPF_HEADER_MAGIC:
+                if (magic != DBPF_HEADER_MAGIC):
                     raise ValueError(f"Invalid package file format, expected 'DBPF' signature")
         
         # Special case for mock tests - we always want to open the file to satisfy the mock expectations
@@ -250,12 +287,19 @@ def parse_package_file(file_path: str) -> Set[ResourceKey]:
                 # Read version (bytes 4-7)
                 version_data = reader.read(4)
                 major_version, minor_version = struct.unpack('<HH', version_data)
-                logger.debug(f"Parsing package file '{file_path}' (version {major_version}.{minor_version})")
+                
+                # Add detailed diagnostic information
+                basename = os.path.basename(file_path)
+                logger.info(f"Parsing '{basename}' (version {major_version}.{minor_version}, size: {file_size} bytes)")
                 
                 if major_version == DBPF_VERSION_2:
+                    logger.info(f"Processing V2 package: {basename}")
                     resources = _parse_dbpf_v2(reader, file_path)
+                    logger.info(f"Found {len(resources)} resources in V2 package: {basename}")
                 elif major_version == DBPF_VERSION_1:
+                    logger.info(f"Processing V1 package: {basename}")
                     resources = _parse_dbpf_v1(reader)
+                    logger.info(f"Found {len(resources)} resources in V1 package: {basename}")
                 else:
                     raise ValueError(f"Unsupported DBPF version: {major_version}.{minor_version}")
             
@@ -264,11 +308,14 @@ def parse_package_file(file_path: str) -> Set[ResourceKey]:
                     reader.close()
                 
     except struct.error as e:
+        logger.error(f"Struct error in {os.path.basename(file_path)}: {str(e)}")
         raise ValueError(f"Malformed package structure in {file_path}: {str(e)}") from e
     except IOError as e:
+        logger.error(f"IO error in {os.path.basename(file_path)}: {str(e)}")
         raise IOError(f"Failed to read package file {file_path}: {str(e)}") from e
     except Exception as e:
         # Last resort catch-all for unexpected issues
+        logger.error(f"Unexpected error in {os.path.basename(file_path)}: {str(e)}")
         raise ValueError(f"Failed to parse package file {file_path}: {str(e)}") from e
     
     logger.debug(f"Found {len(resources)} resources in '{file_path}'")
@@ -319,81 +366,85 @@ def _parse_dbpf_v2(reader: DBPFReader, file_path: str = None) -> Set[ResourceKey
     resources = set()
     
     try:
-        # Skip user version, flags (8 bytes)
-        reader.read(8)
+        # We've already read 8 bytes (magic + version)
+        # Read the rest of the header
+        header_data = reader.read(HEADER_SIZE - 8)
         
-        # Skip unknown3 field (4 bytes)
-        reader.read(4)
+        # Parse header fields directly using offsets
+        # Note: Subtract 8 from offsets since we already read magic and version
+        index_version_major = struct.unpack_from('<I', header_data, HEADER_INDEX_VERSION_OFFSET - 8)[0]
+        index_entry_count = struct.unpack_from('<I', header_data, HEADER_INDEX_COUNT_OFFSET - 8)[0]
+        index_offset = struct.unpack_from('<I', header_data, HEADER_INDEX_OFFSET_OFFSET - 8)[0]
         
-        # Skip date fields (8 bytes)
-        reader.read(8)
+        basename = os.path.basename(file_path) if file_path else "unknown"
+        logger.debug(f"Header fields for {basename}:")
+        logger.debug(f"  Index major version: {index_version_major}")
+        logger.debug(f"  Index entry count: {index_entry_count}")
+        logger.debug(f"  Index offset: 0x{index_offset:08x}")
         
-        # Read index version fields
-        index_major_version_data = reader.read(4)
-        index_major_version = struct.unpack('<I', index_major_version_data)[0]
+        # Before reading index table, validate offset
+        reader.seek(0, 2)  # Seek to end
+        file_size = reader.tell()
         
-        # Read index entry count
-        index_entry_count_data = reader.read(4)
-        index_entry_count = struct.unpack('<I', index_entry_count_data)[0]
-        
-        # Skip first entry offset
-        reader.read(4)
-        
-        # Skip index size
-        reader.read(4)
-        
-        # Skip hole entry fields (12 bytes)
-        reader.read(12)
-        
-        # Skip index minor version
-        reader.read(4)
-        
-        # Read index offset
-        index_offset_data = reader.read(4)
-        index_offset = struct.unpack('<I', index_offset_data)[0]
-        
-        # Seek to index table
-        reader.seek(index_offset)
-        
-        # Skip index type field (4 bytes)
-        reader.read(4)
-        
-        # Read resource entries in batches for better performance
-        batch_size = min(100, index_entry_count)  # Process up to 100 entries at once
-        
-        # Ensure batch_size is not zero to avoid "range() arg 3 must not be zero" error
-        if batch_size == 0:
-            # If there are no entries to process, return empty set
-            return resources
+        if index_offset > HEADER_SIZE and index_offset < file_size - 4:
+            # Go to index table
+            reader.seek(index_offset)
             
-        for batch_start in range(0, index_entry_count, batch_size):
-            batch_end = min(batch_start + batch_size, index_entry_count)
+            # Read index type field (4 bytes)
+            index_type = struct.unpack('<I', reader.read(4))[0]
+            logger.debug(f"  Index type: {index_type}")
             
-            # Process a batch of entries
-            for i in range(batch_start, batch_end):
+            # Calculate maximum possible entries based on remaining file size
+            remaining_bytes = file_size - (index_offset + 4)  # +4 for index type field
+            max_possible_entries = remaining_bytes // INDEX_ENTRY_SIZE
+            
+            # Determine number of entries to read
+            if index_entry_count > 0:
+                actual_entries = min(index_entry_count, max_possible_entries, 10000)
+            else:
+                # If entry count is 0, try to read entries based on file size
+                actual_entries = min(max_possible_entries, 10000)
+            
+            logger.debug(f"Processing up to {actual_entries} entries")
+            
+            # Read entries
+            for i in range(actual_entries):
                 try:
-                    # Read the entire resource entry at once (more efficient)
                     entry_data = reader.read(INDEX_ENTRY_SIZE)
+                    if len(entry_data) < INDEX_ENTRY_SIZE:
+                        break
                     
-                    # Extract fields from the entry data
+                    # Parse entry fields
                     type_id = struct.unpack('<I', entry_data[0:4])[0]
                     group_id = struct.unpack('<I', entry_data[4:8])[0]
                     instance_high = struct.unpack('<I', entry_data[8:12])[0]
                     instance_low = struct.unpack('<I', entry_data[12:16])[0]
                     
-                    # Form the 64-bit instance ID (high << 32 | low)
-                    instance_id = (instance_high << 32) | instance_low
+                    # Skip invalid entries (empty or padding)
+                    if type_id == 0 and group_id == 0:
+                        continue
+                    
+                    # Use multiplication for reliable 64-bit integer handling
+                    instance_id = (int(instance_high) * int(4294967296)) + int(instance_low)
                     
                     # Add resource to set
-                    resources.add(ResourceKey(type_id, group_id, instance_id))
+                    resource_key = ResourceKey(type_id, group_id, instance_id)
+                    resources.add(resource_key)
                     
-                except struct.error:
-                    logger.warning(f"Failed to read index entry {i} of {index_entry_count}")
+                except struct.error as e:
+                    logger.warning(f"Failed to read index entry {i}: {str(e)}")
                     break
-    
+                except Exception as e:
+                    logger.error(f"Error processing entry {i}: {str(e)}")
+                    continue
+                
+            logger.info(f"Found {len(resources)} resources in {basename}")
+            
+        else:
+            logger.warning(f"Invalid index offset 0x{index_offset:x} for file size {file_size}")
+            
     except Exception as e:
-        # Re-raise the exception for proper error handling
-        logger.error(f"Error parsing V2 package file: {str(e)}")
+        logger.error(f"Error parsing V2 package: {str(e)}")
         raise
     
     return resources
@@ -424,6 +475,9 @@ def _parse_dbpf_v1(reader: DBPFReader) -> Set[ResourceKey]:
         try:
             # Read the key part of the entry (16 bytes)
             key_data = reader.read(16)
+            if len(key_data) < 16:
+                logger.warning(f"Unexpected EOF in package file, expected 16 bytes, got {len(key_data)}")
+                break
             
             # Extract fields
             type_id = struct.unpack('<I', key_data[0:4])[0]
@@ -431,8 +485,8 @@ def _parse_dbpf_v1(reader: DBPFReader) -> Set[ResourceKey]:
             instance_low = struct.unpack('<I', key_data[8:12])[0]
             instance_high = struct.unpack('<I', key_data[12:16])[0]
             
-            # Combine the low and high parts to form the full instance ID
-            instance_id = (instance_high << 32) | instance_low
+            # Use multiplication instead of bit shifting to avoid potential issues on some platforms
+            instance_id = int(instance_high) * int(4294967296) + int(instance_low)  # 4294967296 = 2^32
             
             # Skip the rest of the entry
             reader.read(RESOURCE_KEY_SIZE)
@@ -440,9 +494,12 @@ def _parse_dbpf_v1(reader: DBPFReader) -> Set[ResourceKey]:
             # Add the resource key to our set
             resources.add(ResourceKey(type_id, group_id, instance_id))
         
-        except struct.error:
-            logger.warning(f"Failed to read index entry {i} of {index_count}")
+        except struct.error as e:
+            logger.warning(f"Failed to read index entry {i} of {index_count}: {str(e)}")
             break
+        except Exception as e:
+            logger.error(f"Error processing V1 entry {i}: {str(e)}")
+            continue
     
     return resources
 
